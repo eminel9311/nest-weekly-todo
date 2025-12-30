@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { SignInDto } from './dtos/sign-in.dto';
 import * as bcrypt from 'bcrypt';
@@ -9,6 +9,9 @@ import { SignUpDto } from './dtos/sign-up.dto';
 import { IJwt } from '../config/interfaces/jwt.interface';
 import { ConfigService } from '@nestjs/config';
 import { LogoutDto } from './dtos/logout.dto';
+import { RefreshTokenDto } from './dtos/refresh-token.dto';
+import { IRefreshPayload } from 'src/jwt/interfaces/refresh-token.interface';
+import { ITokenBase } from 'src/jwt/interfaces/token-base.interface';
 
 @Injectable()
 export class AuthService {
@@ -23,6 +26,8 @@ export class AuthService {
 
   public async signIn(signInDto: SignInDto, domain?: string | null): Promise<IAuthSignInResult> {
     const { emailOrUsername, password } = signInDto;
+
+    // Step 1: Find user
     const user = await this.prisma.user.findFirst({
       where: {
         OR: [
@@ -34,22 +39,26 @@ export class AuthService {
     if (!user) {
       throw new UnauthorizedException('Invalid email or username or password');
     }
+    // Step 2: Verify password
     const isPasswordValid = await bcrypt.compare(password, user.password);
     if (!isPasswordValid) {
       throw new UnauthorizedException('Invalid email or username or password');
     };
 
-    // Xóa tất cả refresh token cũ của user (single active token strategy)
+    // Step 3: Revoke all existing refresh tokens (Single Active Token Strategy)
     await this.revokeAllRefreshTokens(user.id);
 
 
+    // Step 4: Generate new tokens
     const [accessToken, refreshToken] = await this.jwtService.generateAuthTokens(user, domain);
+
+    // Step 5: Save refresh token (hashed) to database
     await this.saveRefreshToken(refreshToken, user.id);
+
+    // Step 6: Return tokens
     return {
-      // user,
       accessToken,
       refreshToken,
-      // expiresIn: this.jwtService.accessTime,
     }
   }
 
@@ -71,13 +80,105 @@ export class AuthService {
   }
 
   public async logout(logoutDto: LogoutDto): Promise<IAuthLogoutResult> {
-    // Xóa tất cả refresh token cũ của user (single active token strategy)
-    await this.revokeAllRefreshTokens(logoutDto.userId);
+    // Validate userId
+    const user = await this.prisma.user.findUnique({
+      where: {
+        id: logoutDto.userId,
+      }
+    })
+    if(!user) {
+      throw new NotFoundException('User not found');
+    }
+    // Revoke all refresh tokens
+    await this.revokeAllRefreshTokens(user.id);
     return {
       message: 'User logged out successfully',
     };
   }
 
+
+  public async refreshToken(refreshTokenDto: RefreshTokenDto): Promise<IAuthSignInResult> {
+    const { refreshToken } = refreshTokenDto;
+
+    // Step 1: Verify JWT signature và decode payload
+    let payload: IRefreshPayload & ITokenBase;
+    try {
+      payload = await this.jwtService.verifyRefreshToken(refreshToken);
+    } catch (error) {
+      if (error.message === 'Token expired') {
+        throw new UnauthorizedException('Refresh token expired');
+      }
+      throw new UnauthorizedException('Invalid refresh token');
+    }
+    console.log('payload123', payload);
+    // Step 2: Check expiration từ payload (double check)
+    const currentTime = Math.floor(Date.now() / 1000);
+    if (payload.exp < currentTime) {
+      throw new UnauthorizedException('Refresh token expired');
+    }
+
+    // Step 3: Find user
+    const user = await this.prisma.user.findUnique({
+      where: {
+        id: payload.userId,
+      }
+    })
+
+    if (!user) {
+      throw new UnauthorizedException('User not found');
+    }
+
+    // Step 4-6: Tất cả trong 1 transaction tránh lỗi race condition
+    const result = await this.prisma.$transaction(async (tx) => {
+      // Find token in database
+      const storedToken = await tx.refreshToken.findFirst({
+        where: { userId: user.id },
+      });
+
+      if (!storedToken) {
+        throw new UnauthorizedException('Refresh token not found or revoked');
+      }
+
+      // Verify token
+      const isMatch = await bcrypt.compare(refreshToken, storedToken.token);
+      if (!isMatch) {
+        throw new UnauthorizedException('Refresh token not found or revoked');
+      }
+
+      // Check expiration
+      if (storedToken.expiresAt < new Date()) {
+        await tx.refreshToken.delete({ where: { id: storedToken.id } });
+        throw new UnauthorizedException('Refresh token expired');
+      }
+
+      // Token Rotation: Delete old token
+      await tx.refreshToken.delete({ where: { id: storedToken.id } });
+
+      // Generate new tokens
+      const [newAccessToken, newRefreshToken] = await this.jwtService.generateAuthTokens(user);
+
+      // Save new refresh token (hashed) to database
+      const hashedNewRefreshToken = await bcrypt.hash(newRefreshToken, 10);
+      await tx.refreshToken.create({
+        data: {
+          token: hashedNewRefreshToken,
+          expiresAt: new Date(Date.now() + this.jwtConfig.refresh.time * 1000),
+          userId: user.id,
+        }
+      })
+
+      return {
+        newAccessToken,
+        newRefreshToken,
+      }
+    })
+
+    return {
+      accessToken: result.newAccessToken,
+      refreshToken: result.newRefreshToken,
+    }
+
+  }
 
   private comparePasswords(password1: string, password2: string): void {
     if (password1 !== password2) {
