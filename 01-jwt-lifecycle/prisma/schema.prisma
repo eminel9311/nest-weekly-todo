@@ -28,6 +28,7 @@ model User {
 
 model RefreshToken {
   id String @id @default(uuid())
+  tokenId String @unique
   token String @unique
   expiresAt DateTime
   userId String

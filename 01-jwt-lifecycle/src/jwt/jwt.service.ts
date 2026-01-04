@@ -20,52 +20,9 @@ export class JwtService {
     this.domain = this.configService.get<string>('domain');
   }
 
-
   public get accessTime(): number {
     return this.jwtConfig.access.time;
   }
-
-  // public async generateToken(
-  //   user: IUser,
-  //   tokenType: TokenTypeEnum,
-  //   domain?: string | null,
-  //   tokenId?: string
-  // ): Promise<string> {
-  //   const jwtOptions: jwt.SignOptions = {
-  //     issuer: this.issuer,
-  //     subject: user.email,
-  //     audience: domain ?? this.domain,
-  //     algorithm: 'HS256',
-  //   }
-  //   switch (tokenType) {
-  //     case TokenTypeEnum.ACCESS:
-  //       const { privateKey, time: accessTime } = this.jwtConfig.access;
-  //       const accessToken = await JwtService.signToken(
-  //         { userId: user.id },
-  //         privateKey,
-  //         {
-  //           ...jwtOptions,
-  //           expiresIn: accessTime,
-  //           algorithm: 'RS256',
-  //         }
-  //       )
-  //       return accessToken;
-  //     case TokenTypeEnum.REFRESH:
-  //       const { secret: refreshSecret, time: refreshTime } = this.jwtConfig.refresh;
-  //       const refreshToken = await JwtService.signToken(
-  //         { userId: user.id, version: 1, tokenId: tokenId ?? v4() },
-  //         refreshSecret,
-  //         {
-  //           ...jwtOptions,
-  //           expiresIn: refreshTime,
-  //           algorithm: 'HS256',
-  //         }
-  //       )
-  //       return refreshToken;
-  //   }
-  // }
-
-
 
   public async generateAuthTokens(
     user: IUser,
@@ -96,8 +53,7 @@ export class JwtService {
   }
 
 
-
-  public async verifyAccessToken(accessToken: string): Promise<IAccessPayload | ITokenBase> {
+  public async verifyAccessToken(accessToken: string): Promise<IAccessPayload & ITokenBase> {
     const { publicKey } = this.jwtConfig.access;
     return JwtService.verifyToken(accessToken, publicKey, 'RS256');
   }

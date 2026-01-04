@@ -10,8 +10,10 @@ import { IJwt } from '../config/interfaces/jwt.interface';
 import { ConfigService } from '@nestjs/config';
 import { LogoutDto } from './dtos/logout.dto';
 import { RefreshTokenDto } from './dtos/refresh-token.dto';
-import { IRefreshPayload } from 'src/jwt/interfaces/refresh-token.interface';
-import { ITokenBase } from 'src/jwt/interfaces/token-base.interface';
+import { IRefreshPayload } from '../jwt/interfaces/refresh-token.interface';
+import { ITokenBase } from '../jwt/interfaces/token-base.interface';
+import { v4 } from 'uuid';
+import { IAccessPayload } from '../jwt/interfaces/access-token.interface';
 
 @Injectable()
 export class AuthService {
@@ -50,10 +52,11 @@ export class AuthService {
 
 
     // Step 4: Generate new tokens
-    const [accessToken, refreshToken] = await this.jwtService.generateAuthTokens(user, domain);
+    const tokenId = v4();
+    const [accessToken, refreshToken] = await this.jwtService.generateAuthTokens(user, domain, tokenId);
 
     // Step 5: Save refresh token (hashed) to database
-    await this.saveRefreshToken(refreshToken, user.id);
+    await this.saveRefreshToken(refreshToken, user.id, tokenId);
 
     // Step 6: Return tokens
     return {
@@ -80,17 +83,17 @@ export class AuthService {
   }
 
   public async logout(logoutDto: LogoutDto): Promise<IAuthLogoutResult> {
-    // Validate userId
-    const user = await this.prisma.user.findUnique({
-      where: {
-        id: logoutDto.userId,
-      }
-    })
-    if(!user) {
-      throw new NotFoundException('User not found');
+    console.log('logoutDto', logoutDto);
+    // Step 1: Verify JWT signature và decode payload
+    let payload: IAccessPayload & ITokenBase;
+    try {
+      payload = await this.jwtService.verifyAccessToken(logoutDto.accessToken);
+    } catch (error) {
+      throw new UnauthorizedException('Invalid access token');
     }
-    // Revoke all refresh tokens
-    await this.revokeAllRefreshTokens(user.id);
+    console.log('payload', payload);
+    // Step 2: Revoke all refresh tokens
+    await this.revokeAllRefreshTokens(payload.userId);
     return {
       message: 'User logged out successfully',
     };
@@ -110,14 +113,8 @@ export class AuthService {
       }
       throw new UnauthorizedException('Invalid refresh token');
     }
-    console.log('payload123', payload);
-    // Step 2: Check expiration từ payload (double check)
-    const currentTime = Math.floor(Date.now() / 1000);
-    if (payload.exp < currentTime) {
-      throw new UnauthorizedException('Refresh token expired');
-    }
 
-    // Step 3: Find user
+    // Step 2: Find user
     const user = await this.prisma.user.findUnique({
       where: {
         id: payload.userId,
@@ -128,11 +125,11 @@ export class AuthService {
       throw new UnauthorizedException('User not found');
     }
 
-    // Step 4-6: Tất cả trong 1 transaction tránh lỗi race condition
+    // Step 3-6: Tất cả trong 1 transaction tránh lỗi race condition
     const result = await this.prisma.$transaction(async (tx) => {
       // Find token in database
       const storedToken = await tx.refreshToken.findFirst({
-        where: { userId: user.id },
+        where: { userId: user.id, tokenId: payload.tokenId },
       });
 
       if (!storedToken) {
@@ -155,12 +152,14 @@ export class AuthService {
       await tx.refreshToken.delete({ where: { id: storedToken.id } });
 
       // Generate new tokens
-      const [newAccessToken, newRefreshToken] = await this.jwtService.generateAuthTokens(user);
+      const newTokenId = v4();
+      const [newAccessToken, newRefreshToken] = await this.jwtService.generateAuthTokens(user, undefined, newTokenId);
 
       // Save new refresh token (hashed) to database
       const hashedNewRefreshToken = await bcrypt.hash(newRefreshToken, 10);
       await tx.refreshToken.create({
         data: {
+          tokenId: newTokenId,
           token: hashedNewRefreshToken,
           expiresAt: new Date(Date.now() + this.jwtConfig.refresh.time * 1000),
           userId: user.id,
@@ -187,10 +186,11 @@ export class AuthService {
   }
 
   // save refresh token(hashed) to database
-  private async saveRefreshToken(refreshToken: string, userId: string): Promise<string> {
+  private async saveRefreshToken(refreshToken: string, userId: string, tokenId: string): Promise<string> {
     const hashedRefreshToken = await bcrypt.hash(refreshToken, 10);
     const data = await this.prisma.refreshToken.create({
       data: {
+        tokenId,
         token: hashedRefreshToken,
         expiresAt: new Date(Date.now() + this.jwtConfig.refresh.time * 1000),
         userId,

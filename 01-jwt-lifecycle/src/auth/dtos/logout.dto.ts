@@ -4,11 +4,10 @@ import { IsString, IsUUID } from "class-validator";
 
 export abstract class LogoutDto {
   @ApiProperty({
-    description: 'The user ID',
-    example: '123e4567-e89b-12d3-a456-426614174000',
+    description: 'The access token to identify the user',
+    example: 'eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...',
     type: String,
   })
   @IsString()
-  @IsUUID()
-  public userId: string;
+  public accessToken: string;
 }
