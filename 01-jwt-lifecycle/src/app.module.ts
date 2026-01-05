@@ -7,6 +7,7 @@ import { config } from './config';
 import { AuthModule } from './auth/auth.module';
 import { JwtModule } from './jwt/jwt.module';
 import { UsersModule } from './users/users.module';
+import { CommonModule } from './common/common.module';
 
 @Module({
   imports: [
@@ -17,7 +18,8 @@ import { UsersModule } from './users/users.module';
     }),
     AuthModule,
     JwtModule,
-    UsersModule
+    UsersModule,
+    CommonModule
   ],
   controllers: [AppController],
   providers: [AppService],
