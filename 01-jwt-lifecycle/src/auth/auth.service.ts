@@ -13,7 +13,7 @@ import { RefreshTokenDto } from './dtos/refresh-token.dto';
 import { IRefreshPayload } from '../jwt/interfaces/refresh-token.interface';
 import { ITokenBase } from '../jwt/interfaces/token-base.interface';
 import { v4 } from 'uuid';
-import { IAccessPayload } from '../jwt/interfaces/access-token.interface';
+import { IAccessPayload, IAccessToken } from '../jwt/interfaces/access-token.interface';
 
 @Injectable()
 export class AuthService {
@@ -82,18 +82,9 @@ export class AuthService {
     };
   }
 
-  public async logout(logoutDto: LogoutDto): Promise<IAuthLogoutResult> {
-    console.log('logoutDto', logoutDto);
-    // Step 1: Verify JWT signature và decode payload
-    let payload: IAccessPayload & ITokenBase;
-    try {
-      payload = await this.jwtService.verifyAccessToken(logoutDto.accessToken);
-    } catch (error) {
-      throw new UnauthorizedException('Invalid access token');
-    }
-    console.log('payload', payload);
-    // Step 2: Revoke all refresh tokens
-    await this.revokeAllRefreshTokens(payload.userId);
+
+  public async logout(userId: string): Promise<IAuthLogoutResult> {
+    await this.revokeAllRefreshTokens(userId);
     return {
       message: 'User logged out successfully',
     };

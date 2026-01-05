@@ -128,11 +128,11 @@ export class JwtService {
   }
 
   // Helper: Verify token
-  private static async verifyToken(
+  private static async verifyToken<T>(
     token: string,
     secretOrPublicKey: string,
     algorithm: string
-  ): Promise<any> {
+  ): Promise<T> {
     return new Promise((resolve, reject) => {
       jwt.verify(
         token,

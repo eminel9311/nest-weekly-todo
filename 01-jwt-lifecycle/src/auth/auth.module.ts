@@ -4,9 +4,11 @@ import { AuthController } from './auth.controller';
 import { JwtModule } from '../jwt/jwt.module';
 import { PrismaService } from '../prisma/prisma.service';
 import { JwtService } from 'src/jwt/jwt.service';
+import { JwtAuthGuard } from './guards/jwt-auth.guard';
 @Module({
   imports: [JwtModule],
-  providers: [AuthService, JwtService, PrismaService],
-  controllers: [AuthController]
+  providers: [AuthService, JwtService, PrismaService, JwtAuthGuard],
+  controllers: [AuthController],
+  exports: [JwtAuthGuard],
 })
 export class AuthModule {}
