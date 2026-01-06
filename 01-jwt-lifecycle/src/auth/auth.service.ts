@@ -13,7 +13,6 @@ import { RefreshTokenDto } from './dtos/refresh-token.dto';
 import { IRefreshPayload } from '../jwt/interfaces/refresh-token.interface';
 import { ITokenBase } from '../jwt/interfaces/token-base.interface';
 import { v4 } from 'uuid';
-import { IAccessPayload, IAccessToken } from '../jwt/interfaces/access-token.interface';
 
 @Injectable()
 export class AuthService {
